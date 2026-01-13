@@ -13,7 +13,7 @@ where
     let channels = u32::from(input.channels());
     st.set_channels(channels);
     st.set_sample_rate(input.sample_rate());
-    st.set_rate(f64::from(rate));
+    st.set_tempo(f64::from(rate));
 
     let min_samples =
         u32::try_from(st.get_setting(Setting::NominalInputSequence)).unwrap() * channels;
@@ -133,7 +133,7 @@ where
         let channels = u32::from(self.input.channels());
 
         // in rodio and symphonia, any of these factors could have changed since the last time
-        self.soundtouch.set_tempo(self.factor);
+        self.soundtouch.set_rate(self.factor);
         self.soundtouch.set_channels(channels);
         self.soundtouch.set_sample_rate(self.input.sample_rate());
 
