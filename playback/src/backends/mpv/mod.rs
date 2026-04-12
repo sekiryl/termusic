@@ -74,6 +74,8 @@ impl MpvBackend {
         let gapless_setting = if gapless { "yes" } else { "no" };
         mpv.set_property("gapless-audio", gapless_setting)
             .expect("gapless setting failed");
+        mpv.set_property("audio-pitch-correction", "no")
+            .expect("Error disabling pitch correction");
 
         let icmd_tx = command_tx.clone();
         std::thread::Builder::new()

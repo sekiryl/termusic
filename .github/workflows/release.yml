@@ -1,217 +1,50 @@
 name: Release
-on:
-  # schedule:
-  # - cron: '0 0 * * *' # midnight UTC
 
+on:
   push:
-    tags:
-    - 'v[0-99]+.[0-99]+.[0-99]+'
-    ## - release
+    branches:
+      - '**'
 
 env:
   BIN_NAME: termusic
-  BIN_NAME_SERVER: termusic-server 
-  PROJECT_NAME: termusic 
-  REPO_NAME: tramhao/termusic
-  # BREW_TAP: jondot/homebrew-tap
+  BIN_NAME_SERVER: termusic-server
 
 jobs:
   dist:
     name: Dist
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false # don't fail other jobs if one fails
-      matrix:
-        build: [x86_64-linux, aarch64-linux, x86_64-macos, x86_64-windows, aarch64-macos] # x86_64-win-gnu, win32-msvc
-        include:
-        - build: x86_64-linux
-          os: ubuntu-latest
-          rust: stable
-          target: x86_64-unknown-linux-gnu
-        - build: aarch64-linux
-          os: ubuntu-24.04-arm
-          rust: stable
-          target: aarch64-unknown-linux-gnu
-        - build: x86_64-macos
-          os: macos-latest
-          rust: stable
-          target: x86_64-apple-darwin
-        - build: aarch64-macos
-          os: macos-latest
-          rust: stable
-          target: aarch64-apple-darwin
-        - build: x86_64-windows
-          os: windows-latest
-          rust: stable
-          target: x86_64-pc-windows-msvc
-        # - build: x86_64-win-gnu
-        #   os: windows-2019
-        #   rust: stable-x86_64-gnu
-        #   target: x86_64-pc-windows-gnu
-        # - build: win32-msvc
-        #   os: windows-2019
-        #   rust: stable
-        #   target: i686-pc-windows-msvc
-
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Install ${{ matrix.rust }} toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ matrix.rust }}
-          targets: ${{ matrix.target }}
-
-      - name: Install developer package dependencies
-        if: matrix.build == 'x86_64-linux' || matrix.build == 'aarch64-linux'
-        run: sudo apt-get update && sudo apt-get install libasound2-dev libdbus-1-dev pkg-config protobuf-compiler libgstreamer1.0-0 libunwind-dev libgstreamer1.0-dev libmpv-dev
-
-      - name: Install developer package dependencies
-        if: matrix.build == 'x86_64-macos' || matrix.build == 'aarch64-macos'
-        run: | 
-            brew update
-            brew install protobuf
-  
-      - name: Install developer package dependencies
-        if: matrix.build == 'x86_64-windows'
-        run: choco install protoc 
-      
-      - name: Run cargo test (cargo)
-        if: (matrix.build == 'x86_64-linux' || matrix.build == 'aarch64-linux' || matrix.build == 'x86_64-macos' || matrix.build == 'aarch64-macos' || matrix.build == 'x86_64-windows')
-        run: cargo test --release --target ${{ matrix.target }}
-
-      - name: Build release binary (cargo x86_64-linux and aarch64-linux)
-        if: matrix.build == 'x86_64-linux' || matrix.build == 'aarch64-linux'
-        run: cargo build --features cover,all-backends,rusty-soundtouch --release --all --target ${{ matrix.target }}
-
-      - name: Build release binary (cargo x86_64-macos and aarch64-macos)
-        if: matrix.build == 'x86_64-macos' || matrix.build == 'aarch64-macos'
-        run: cargo build --features rusty-soundtouch,rusty-simd --release --all --target ${{ matrix.target }}
-
-      - name: Build release binary (cargo x86_64-windows)
-        if: matrix.build == 'x86_64-windows'
-        run: cargo build --features rusty-soundtouch --release --all --target ${{ matrix.target }}
-
-      - name: Strip release binary (linux and macos)
-        if: matrix.build == 'x86_64-linux' || matrix.build == 'aarch64-linux' || matrix.build == 'x86_64-macos' || matrix.build == 'aarch64-macos'
-        run: |
-          strip "target/${{ matrix.target }}/release/$BIN_NAME"
-          strip "target/${{ matrix.target }}/release/$BIN_NAME_SERVER"
-
-      - name: Build archive
-        shell: bash
-        run: |
-          mkdir dist
-          if [ "${{ matrix.os }}" = "windows-2019" ]; then
-            cp "target/${{ matrix.target }}/release/$BIN_NAME.exe" "dist/"
-            cp "target/${{ matrix.target }}/release/$BIN_NAME_SERVER.exe" "dist/"
-          else
-            cp "target/${{ matrix.target }}/release/$BIN_NAME" "dist/"
-            cp "target/${{ matrix.target }}/release/$BIN_NAME_SERVER" "dist/"
-          fi
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: bins-${{ matrix.build }}
-          path: dist
-
-  publish:
-    name: Publish
-    needs: [dist]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - uses: actions/download-artifact@v8
-        # with:
-        #   path: dist
-      # - run: ls -al ./dist
-      - run: ls -al bins-*
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
 
-      # - uses: actions/download-artifact@v8
-      #   # with:
-      #   windowspath: dist
-      # - runchoco install protoc ls -al ./dist
-      - name: Calculate tag name
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev pkg-config protobuf-compiler libgstreamer1.0-dev libmpv-dev libunwind-dev
+
+      - name: Build
+        run: cargo build --features cover,all-backends,rusty-soundtouch --release --all --target x86_64-unknown-linux-gnu
+
+      - name: Strip binaries
         run: |
-          name=dev
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            name=${GITHUB_REF:10}
-          fi
-          echo "name=val::$name" >> $GITHUB_OUTPUT
-          echo "TAG=$name" >> $GITHUB_ENV
-        id: tagname
+          strip target/x86_64-unknown-linux-gnu/release/$BIN_NAME
+          strip target/x86_64-unknown-linux-gnu/release/$BIN_NAME_SERVER
 
-      - name: Build archive
-        shell: bash
+      - name: Package
         run: |
-          set -ex
+          mkdir -p dist
+          tar cJf dist/termusic-latest.tar.xz \
+            -C target/x86_64-unknown-linux-gnu/release \
+            $BIN_NAME $BIN_NAME_SERVER
 
-          rm -rf tmp
-          mkdir tmp
-          mkdir dist
-
-          for dir in bins-* ; do
-              platform=${dir#"bins-"}
-              if [[ $platform =~ "windows" ]]; then
-                  exe=".exe"
-              fi
-              pkgname=$PROJECT_NAME-$TAG-$platform
-              mkdir tmp/$pkgname
-              cp LICENSE_MIT README.md tmp/$pkgname
-              mv bins-$platform/$BIN_NAME$exe tmp/$pkgname
-              mv bins-$platform/$BIN_NAME_SERVER$exe tmp/$pkgname
-              chmod +x tmp/$pkgname/$BIN_NAME$exe
-              chmod +x tmp/$pkgname/$BIN_NAME_SERVER$exe
-
-              if [ "$exe" = "" ]; then
-                  tar cJf dist/$pkgname.tar.xz -C tmp $pkgname
-              else
-                  (cd tmp && 7z a -r ../dist/$pkgname.zip $pkgname)
-              fi
-          done
-
-      - name: Upload binaries to release
+      - name: Upload release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: dist/*
-          file_glob: true
-          # tag: ${{ steps.tagname.outputs.TAG }}
-          tag: ${{ github.ref }}
+          file: dist/termusic-latest.tar.xz
+          tag: latest
+          release_name: termusic-latest
           overwrite: true
-
-      - name: Extract version
-        id: extract-version
-        run: |
-          printf "name=%s::%s\n" tag-name "${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      # - uses: mislav/bump-homebrew-formula-action@v1
-      #   with:
-      #     formula-path: ${{env.PROJECT_NAME}}.rb
-      #     homebrew-tap: ${{ env.BREW_TAP }}
-      #     download-url: "https://github.com/${{ env.REPO_NAME }}/releases/download/${{ steps.extract-version.outputs.tag-name }}/${{env.PROJECT_NAME}}-${{ steps.extract-version.outputs.tag-name }}-x86_64-macos.tar.xz"
-      #     commit-message: updating formula for ${{ env.PROJECT_NAME }}
-      #   env:
-      #     COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
-        #
-        # you can use this initial file in your homebrew-tap if you don't have an initial formula:
-        # <projectname>.rb
-        #
-        # class <Projectname capitalized> < Formula
-        #   desc "A test formula"
-        #   homepage "http://www.example.com"
-        #   url "-----"
-        #   version "-----"
-        #   sha256 "-----"
-
-        #   def install
-        #     bin.install "<bin-name>"
-        #   end
-        # end
