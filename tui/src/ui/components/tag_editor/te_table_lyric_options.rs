@@ -2,19 +2,25 @@ use anyhow::{Context, Result, anyhow};
 use termusiclib::config::SharedTuiSettings;
 use termusiclib::songtag::{SongTag, SongtagSearchResult, search};
 use tokio::runtime::Handle;
-use tui_realm_stdlib::Table;
+use tui_realm_stdlib::components::Table;
+use tui_realm_stdlib::prop_ext::CommonHighlight;
 use tuirealm::command::{Cmd, CmdResult, Direction, Position};
-use tuirealm::event::{Key, KeyEvent, KeyModifiers};
-use tuirealm::props::{Alignment, BorderType, Borders, TableBuilder, TextSpan};
-use tuirealm::{Component, Event, MockComponent, State, StateValue};
+use tuirealm::component::{AppComponent, Component};
+use tuirealm::event::{Event, Key, KeyEvent, KeyModifiers};
+use tuirealm::props::{
+    AttrValue, Attribute, BorderType, Borders, HorizontalAlignment, LineStatic, Style,
+    TableBuilder, Title,
+};
+use tuirealm::state::{State, StateValue};
 
 use crate::ui::Model;
 use crate::ui::components::TETrack;
 use crate::ui::ids::{Id, IdTagEditor};
 use crate::ui::model::UserEvent;
 use crate::ui::msg::{Msg, TEMsg, TFMsg};
+use crate::ui::utils::STYLE_REMOVE_REVERSE;
 
-#[derive(MockComponent)]
+#[derive(Component)]
 pub struct TETableLyricOptions {
     component: Table,
     config: SharedTuiSettings,
@@ -32,11 +38,16 @@ impl TETableLyricOptions {
                 )
                 .foreground(config.settings.theme.library_foreground())
                 .background(config.settings.theme.library_background())
-                .title(" Search Results ", Alignment::Left)
+                .title(Title::from(" Search Results ").alignment(HorizontalAlignment::Left))
                 .scroll(true)
-                .highlighted_color(config.settings.theme.library_highlight())
-                .highlighted_str("\u{1f680}")
-                // .highlighted_str("🚀")
+                .highlight_style(
+                    CommonHighlight::default()
+                        .style
+                        .fg(config.settings.theme.library_highlight()),
+                )
+                .highlight_style_inactive(STYLE_REMOVE_REVERSE)
+                .highlight_str("\u{1f680}")
+                // .highlight_str("🚀")
                 .rewind(false)
                 .step(4)
                 .row_height(1)
@@ -45,9 +56,9 @@ impl TETableLyricOptions {
                 .widths(&[20, 20, 20, 10, 30])
                 .table(
                     TableBuilder::default()
-                        .add_col(TextSpan::from("0"))
-                        .add_col(TextSpan::from(" "))
-                        .add_col(TextSpan::from("No Results."))
+                        .add_col(LineStatic::from("0"))
+                        .add_col(LineStatic::from(" "))
+                        .add_col(LineStatic::from("No Results."))
                         .build(),
                 )
         };
@@ -56,8 +67,8 @@ impl TETableLyricOptions {
     }
 }
 
-impl Component<Msg, UserEvent> for TETableLyricOptions {
-    fn on(&mut self, ev: Event<UserEvent>) -> Option<Msg> {
+impl AppComponent<Msg, UserEvent> for TETableLyricOptions {
+    fn on(&mut self, ev: &Event<UserEvent>) -> Option<Msg> {
         let config = self.config.clone();
         let keys = &config.read().settings.keys;
         let cmd_result = match ev {
@@ -117,24 +128,24 @@ impl Component<Msg, UserEvent> for TETableLyricOptions {
                 self.perform(Cmd::GoTo(Position::End))
             }
             Event::Keyboard(k) if k == keys.library_keys.youtube_search.get() => {
-                if let State::One(StateValue::Usize(index)) = self.state() {
+                if let State::Single(StateValue::Usize(index)) = self.state() {
                     return Some(Msg::TagEditor(TEMsg::Download(index)));
                 }
-                CmdResult::None
+                CmdResult::NoChange
             }
             Event::Keyboard(KeyEvent {
                 code: Key::Enter, ..
             }) => {
-                if let State::One(StateValue::Usize(index)) = self.state() {
+                if let State::Single(StateValue::Usize(index)) = self.state() {
                     return Some(Msg::TagEditor(TEMsg::Embed(index)));
                 }
-                CmdResult::None
+                CmdResult::NoChange
             }
 
-            _ => CmdResult::None,
+            _ => CmdResult::NoChange,
         };
         match cmd_result {
-            CmdResult::None => None,
+            CmdResult::NoChange => None,
             _ => Some(Msg::ForceRedraw),
         }
     }
@@ -150,7 +161,7 @@ impl Model {
         {
             return;
         }
-        self.songtag_options = items;
+        self.tageditor.songtag_results = items;
         self.te_sync_songtag_options();
         assert!(
             self.app
@@ -169,7 +180,7 @@ impl Model {
             .theme
             .library_highlight();
 
-        for (idx, record) in self.songtag_options.iter().enumerate() {
+        for (idx, record) in self.tageditor.songtag_results.iter().enumerate() {
             if idx > 0 {
                 table.add_row();
             }
@@ -185,11 +196,14 @@ impl Model {
             };
 
             table
-                .add_col(TextSpan::new(artist).fg(artist_color))
-                .add_col(TextSpan::new(title).bold())
-                .add_col(TextSpan::new(album))
-                .add_col(TextSpan::new(api))
-                .add_col(TextSpan::new(url));
+                .add_col(LineStatic::styled(
+                    artist.to_string(),
+                    Style::new().fg(artist_color),
+                ))
+                .add_col(LineStatic::styled(title.to_string(), Style::new().bold()))
+                .add_col(LineStatic::from(album.to_string()))
+                .add_col(LineStatic::from(api))
+                .add_col(LineStatic::from(url.to_string()));
         }
         let table = table.build();
         self.te_set_results(table).unwrap();
@@ -199,8 +213,8 @@ impl Model {
     fn te_set_results(&mut self, table: tuirealm::props::Table) -> Result<()> {
         self.app.attr(
             &Id::TagEditor(IdTagEditor::TableLyricOptions),
-            tuirealm::Attribute::Content,
-            tuirealm::AttrValue::Table(table),
+            Attribute::Content,
+            AttrValue::Table(table),
         )?;
 
         Ok(())
@@ -209,30 +223,31 @@ impl Model {
     /// Set TagEditor "Search Results" to "Loading"
     fn te_set_loading_results(&mut self) {
         let table = TableBuilder::default()
-            .add_col(TextSpan::from("0"))
-            .add_col(TextSpan::from(" "))
-            .add_col(TextSpan::from("Loading..."))
+            .add_col(LineStatic::from("0"))
+            .add_col(LineStatic::from(" "))
+            .add_col(LineStatic::from("Loading..."))
             .build();
 
         self.te_set_results(table).unwrap();
     }
 
+    /// Run a search with the current data.
     pub fn te_songtag_search(&mut self) {
         let mut search_str = String::new();
-        if let Ok(State::One(StateValue::String(artist))) =
+        if let Ok(State::Single(StateValue::String(artist))) =
             self.app.state(&Id::TagEditor(IdTagEditor::InputArtist))
         {
             search_str.push_str(&artist);
         }
         search_str.push(' ');
-        if let Ok(State::One(StateValue::String(title))) =
+        if let Ok(State::Single(StateValue::String(title))) =
             self.app.state(&Id::TagEditor(IdTagEditor::InputTitle))
         {
             search_str.push_str(&title);
         }
 
         if search_str.len() < 4
-            && let Some(song) = &self.tageditor_song
+            && let Some(song) = &self.tageditor.song
             && let Some(stem) = song.path().file_stem()
         {
             search_str = stem.to_string_lossy().to_string();
@@ -264,13 +279,15 @@ impl Model {
         }
     }
 
+    /// Download the given index from the list.
     pub fn te_songtag_download(&mut self, index: usize) -> Result<()> {
         let song_tag = self
-            .songtag_options
+            .tageditor
+            .songtag_results
             .get(index)
             .cloned()
             .with_context(|| format!("no song_tag with index {index} found"))?;
-        if let Some(current_track) = &self.tageditor_song {
+        if let Some(current_track) = &self.tageditor.song {
             let file = current_track.path().to_path_buf();
             // this needs to be wrapped as this is not running another thread but some main-runtime thread and so needs to inform the runtime to hand-off other tasks
             // though i am not fully sure if that is 100% the case, this avoid the panic though
@@ -300,30 +317,33 @@ impl Model {
         }
         Ok(())
     }
-    pub fn te_rename_song_by_tag(&mut self) -> Result<()> {
-        if let Some(mut song) = self.tageditor_song.clone() {
-            if let Ok(State::One(StateValue::String(artist))) =
+
+    /// Save the current tag editor state to the track.
+    pub fn te_save_tag(&mut self) -> Result<()> {
+        if let Some(mut song) = self.tageditor.song.clone() {
+            if let Ok(State::Single(StateValue::String(artist))) =
                 self.app.state(&Id::TagEditor(IdTagEditor::InputArtist))
             {
                 song.set_artist(&artist);
             }
-            if let Ok(State::One(StateValue::String(title))) =
+            if let Ok(State::Single(StateValue::String(title))) =
                 self.app.state(&Id::TagEditor(IdTagEditor::InputTitle))
             {
                 song.set_title(&title);
             }
 
-            if let Ok(State::One(StateValue::String(album))) =
+            if let Ok(State::Single(StateValue::String(album))) =
                 self.app.state(&Id::TagEditor(IdTagEditor::InputAlbum))
             {
                 song.set_album(&album);
             }
-            if let Ok(State::One(StateValue::String(genre))) =
+            if let Ok(State::Single(StateValue::String(genre))) =
                 self.app.state(&Id::TagEditor(IdTagEditor::InputGenre))
             {
                 song.set_genre(&genre);
             }
             song.save_tag()?;
+            self.tageditor.has_changed = true;
             // the unwrap should also never happen as all components should be properly mounted
             self.init_by_song(song).unwrap();
             self.playlist_update_library_delete();
@@ -335,12 +355,13 @@ impl Model {
     ///
     /// Will send a message once its done.
     pub fn te_load_lyric_and_photo(&mut self, index: usize) -> Result<()> {
-        if self.songtag_options.is_empty() {
+        if self.tageditor.songtag_results.is_empty() {
             return Ok(());
         }
-        if let Some(mut song) = self.tageditor_song.clone() {
+        if let Some(mut song) = self.tageditor.song.clone() {
             let song_tag = self
-                .songtag_options
+                .tageditor
+                .songtag_results
                 .get(index)
                 .cloned()
                 .ok_or_else(|| anyhow!("cannot get songtag"))?;
@@ -391,6 +412,7 @@ impl Model {
     /// Followup function to [`te_load_lyric_and_photo`](Self::te_load_lyric_and_photo)
     /// that executes the remaining operations on `Done` message which require access to `Model` again.
     pub fn te_load_lyric_and_photo_done(&mut self, song: Box<TETrack>) {
+        self.tageditor.has_changed = true;
         let song = *song;
         // the unwrap should also never happen as all components should be properly mounted
         self.init_by_song(song).unwrap();

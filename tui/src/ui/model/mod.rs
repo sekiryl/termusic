@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -22,12 +21,12 @@ use termusiclib::track::{LyricData, MediaTypesSimple, Track};
 use termusiclib::utils::get_app_config_path;
 use termusiclib::xywh;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
-use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalBridge};
+use tuirealm::application::Application;
+use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter, TerminalResult};
 
 use super::components::TETrack;
 use super::tui_cmd::TuiCmd;
 use crate::CombinedSettings;
-use crate::ui::Application;
 use crate::ui::ids::Id;
 use crate::ui::model::ports::stream_events::{PortStreamEvents, WrappedStreamEvents};
 use crate::ui::model::youtube_options::YoutubeOptions;
@@ -265,6 +264,18 @@ impl ExtraLyricData {
     }
 }
 
+/// All data specific to the Tag Editor.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TagEditor {
+    /// The current track open in the tag editor.
+    pub song: Option<TETrack>,
+    /// Stores the result of the songtag fetching.
+    pub songtag_results: Vec<SongTag>,
+    /// Track whether the Tag Editor modified the current track or not.
+    /// Used to force reload of metadata (currently only lyrics)
+    pub has_changed: bool,
+}
+
 pub type TxToMain = UnboundedSender<Msg>;
 
 pub struct Model {
@@ -274,7 +285,7 @@ pub struct Model {
     pub redraw: bool,
     pub app: Application<Id, Msg, UserEvent>,
     /// Used to draw to terminal
-    pub terminal: TerminalBridge<CrosstermTerminalAdapter>,
+    pub terminal: CrosstermTerminalAdapter,
     pub tx_to_main: TxToMain,
     /// Sender for Player Commands
     pub cmd_to_server_tx: UnboundedSender<TuiCmd>,
@@ -287,8 +298,8 @@ pub struct Model {
     pub dw: DatabaseWidgetData,
     pub podcast: PodcastWidgetData,
     pub config_editor: ConfigEditorData,
+    pub tageditor: TagEditor,
 
-    pub tageditor_song: Option<TETrack>,
     pub current_track_lyric: Option<ExtraLyricData>,
     pub playback: Playback,
 
@@ -298,7 +309,6 @@ pub struct Model {
     pub xywh: xywh::Xywh,
 
     youtube_options: YoutubeOptions,
-    pub songtag_options: Vec<SongTag>,
     pub download_tracker: DownloadTracker,
     /// Taskpool to limit number of active network requests
     ///
@@ -374,7 +384,7 @@ impl Model {
 
         let db = Database::new_default_path().expect("Open Library Database");
         let db_criteria = SearchCriteria::Artist;
-        let terminal = TerminalBridge::new_crossterm().expect("Could not initialize terminal");
+        let terminal = Self::init_adapter().expect("Could not initialize terminal");
 
         let db_path = get_app_config_path().expect("failed to get podcast db path.");
 
@@ -412,12 +422,11 @@ impl Model {
             terminal,
             config_server,
             config_tui,
-            tageditor_song: None,
 
+            tageditor: TagEditor::default(),
             youtube_options: YoutubeOptions::default(),
             #[cfg(all(feature = "cover-ueberzug", not(target_os = "windows")))]
             ueberzug_instance,
-            songtag_options: vec![],
             viuer_supported,
             db,
             layout: TermusicLayout::TreeView,
@@ -455,6 +464,15 @@ impl Model {
             .expect("Expected all main component to mount correctly");
 
         model
+    }
+
+    /// Initialize the Terminal modes.
+    fn init_adapter() -> TerminalResult<CrosstermTerminalAdapter> {
+        let mut adapter = CrosstermTerminalAdapter::new()?;
+        adapter.enable_raw_mode()?;
+        adapter.enter_alternate_screen()?;
+
+        Ok(adapter)
     }
 
     #[inline]
@@ -503,37 +521,6 @@ impl Model {
                 );
             }
         }
-    }
-
-    /// Initialize terminal
-    pub fn init_terminal(&mut self) {
-        let original_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |panic| {
-            Self::hook_reset_terminal();
-            original_hook(panic);
-        }));
-        let _drop = self.terminal.enable_raw_mode();
-        let _drop = self.terminal.enter_alternate_screen();
-        // required as "enter_alternate_screen" always enabled mouse-capture
-        let _drop = self.terminal.disable_mouse_capture();
-        let _drop = self.terminal.clear_screen();
-        crate::TERMINAL_ALTERNATE_MODE.store(true, Ordering::SeqCst);
-    }
-
-    /// Finalize terminal for hooks like panic or CTRL+C
-    pub fn hook_reset_terminal() {
-        let mut terminal_clone =
-            TerminalBridge::new_crossterm().expect("Could not initialize terminal");
-        let _drop = terminal_clone.disable_raw_mode();
-        let _drop = terminal_clone.leave_alternate_screen();
-        crate::TERMINAL_ALTERNATE_MODE.store(false, Ordering::SeqCst);
-    }
-
-    /// Finalize terminal
-    pub fn finalize_terminal(&mut self) {
-        let _drop = self.terminal.disable_raw_mode();
-        let _drop = self.terminal.leave_alternate_screen();
-        crate::TERMINAL_ALTERNATE_MODE.store(false, Ordering::SeqCst);
     }
 
     /// Force a redraw of the entire model

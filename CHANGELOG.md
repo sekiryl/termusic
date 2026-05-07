@@ -1,13 +1,14 @@
 ## ChangeLog
 
-### next
-
+### [V0.13.2]
+- Released on: May 6, 2026.
 - Change: updated MSRV to 1.88.
 - Change: enable feature `rusty-soundtouch` for linux, macos & windows CI builds
 - Change: enable feature `rusty-simd` on macos CI builds
 - Change: provide arm64 binaries for macos
 - Change: add `cargo-binstall` metadata to tui and server crates for pre-built binary installs.
 - Fix: change default port to `5101` to be below 49k
+- Fix server cannot be closed properly under windows, configuration are not saved.
 - Fix(tui): fix that "native" and "termusic default" theme also get auto-selected in config editor, if active.
 - Fix(tui): fix a bunch of places where colors were not applied at all or not correctly applied.
 - Fix(tui): fix help popup not having "fast navigation" (like PageUp / PageDown, Home / End).
@@ -17,14 +18,21 @@
 - Fix(tui): fix yt-dlp download error caused by orx treeview.
 - Fix(tui): fix netease lyric download error.
 - Fix(tui): fix migu search/lyric download error.
+- Fix(tui): in tag editor, dont save the track on lyric delete (now only on "Save" action is the change actually persistet).
+- Fix(tui): on tag editor close, force reload of lyrics if the current track was modified.
 - Fix(server): on rusty backend with `soundtouch`, fix a issue causing seemingly long delay between tempo changes.
 - Fix(server): on rusty backend with `soundtouch`, fix not being able to build on "eager" linkers (ex windows-msvc and windows-gnu)
-- Fix(server and tui): server cannot be closed properly under windows, configuration are not saved.
 - Feat: add ability to control startup playing state behavior.
 - Feat: add playlist loop mode to only play the playlist once, then stop.
-- Feat: add ability to control startup playing state behavior.
 - Feat(tui): change default theme to be "Native".
+- Feat(tui): update to tuirealm 4.x. This fixes a bunch of extra styling issues.
 - Feat(server): change volume scaling from linear to cubic for better perceptual volume consistency.
+
+### [v0.13.1]
+- Yanked due to mistake during publish.
+
+### [v0.13.0]
+- Yanked due to mistake during publish.
 
 ### [V0.12.1]
 - Released on: December 11, 2025.
